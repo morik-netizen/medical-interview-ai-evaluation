@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280, height=670">
+<title>サムネイル</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 1280px;
+  height: 670px;
+  overflow: hidden;
+  font-family: 'Hiragino Sans', 'Noto Sans JP', 'Meiryo', sans-serif;
+}
+
+.thumbnail {
+  width: 1280px;
+  height: 670px;
+  background: linear-gradient(135deg, #0a1628 0%, #1a2a4a 40%, #0d2137 100%);
+  position: relative;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+/* 背景の装飾 */
+.bg-grid {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image:
+    linear-gradient(rgba(26,115,232,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26,115,232,0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.bg-circle1 {
+  position: absolute;
+  width: 500px; height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(26,115,232,0.15) 0%, transparent 70%);
+  top: -100px; right: -50px;
+}
+
+.bg-circle2 {
+  position: absolute;
+  width: 300px; height: 300px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,200,150,0.1) 0%, transparent 70%);
+  bottom: -80px; left: 100px;
+}
+
+/* 左側：メインコピー */
+.left {
+  flex: 1;
+  padding: 50px 40px 50px 60px;
+  z-index: 10;
+}
+
+.tag {
+  display: inline-block;
+  background: linear-gradient(90deg, #1a73e8, #4dabf7);
+  color: #fff;
+  padding: 6px 18px;
+  border-radius: 20px;
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  margin-bottom: 20px;
+}
+
+.main-title {
+  font-size: 48px;
+  font-weight: 900;
+  color: #ffffff;
+  line-height: 1.4;
+  margin-bottom: 24px;
+  text-shadow: 0 2px 20px rgba(0,0,0,0.3);
+}
+
+.main-title .highlight {
+  background: linear-gradient(90deg, #4dabf7, #38d9a9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.subtitle {
+  font-size: 18px;
+  color: rgba(255,255,255,0.7);
+  line-height: 1.8;
+}
+
+.subtitle strong {
+  color: #4dabf7;
+}
+
+.author {
+  margin-top: 28px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.author-icon {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1a73e8, #38d9a9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #fff;
+  font-weight: bold;
+}
+
+.author-text {
+  font-size: 14px;
+  color: rgba(255,255,255,0.6);
+}
+
+.author-name {
+  font-size: 16px;
+  color: rgba(255,255,255,0.9);
+  font-weight: bold;
+}
+
+/* 右側：UIモック */
+.right {
+  width: 480px;
+  padding: 30px 50px 30px 0;
+  z-index: 10;
+}
+
+.mock-card {
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 14px;
+}
+
+.mock-score {
+  text-align: center;
+  padding: 20px;
+}
+
+.mock-score-number {
+  font-size: 64px;
+  font-weight: 900;
+  background: linear-gradient(180deg, #fff, #4dabf7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+.mock-score-label {
+  font-size: 16px;
+  color: rgba(255,255,255,0.5);
+  margin-top: 4px;
+}
+
+.mock-grade {
+  display: inline-block;
+  background: linear-gradient(135deg, #1a73e8, #4dabf7);
+  color: #fff;
+  padding: 4px 20px;
+  border-radius: 20px;
+  font-size: 22px;
+  font-weight: 900;
+  margin-top: 8px;
+}
+
+.mock-bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mock-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mock-bar-label {
+  font-size: 12px;
+  color: rgba(255,255,255,0.6);
+  width: 120px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.mock-bar-track {
+  flex: 1;
+  height: 10px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.mock-bar-fill {
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #1a73e8, #4dabf7);
+}
+
+.mock-bar-fill.green {
+  background: linear-gradient(90deg, #2e7d32, #38d9a9);
+}
+
+.mock-bar-score {
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+  width: 50px;
+  flex-shrink: 0;
+}
+
+/* 装飾アイコン */
+.float-icon {
+  position: absolute;
+  font-size: 28px;
+  opacity: 0.15;
+}
+</style>
+</head>
+<body>
+<div class="thumbnail">
+  <div class="bg-grid"></div>
+  <div class="bg-circle1"></div>
+  <div class="bg-circle2"></div>
+
+  <!-- 装飾 -->
+  <span class="float-icon" style="top:30px;left:30px;">&#x1f3e5;</span>
+  <span class="float-icon" style="top:80px;right:420px;">&#x1fa7a;</span>
+  <span class="float-icon" style="bottom:40px;left:250px;">&#x1f4ca;</span>
+  <span class="float-icon" style="bottom:30px;right:30px;">&#x1f916;</span>
+
+  <!-- 左側 -->
+  <div class="left">
+    <div class="tag">AI x 医療教育</div>
+    <div class="main-title">
+      柔整向け<br>医療面接の<br><span class="highlight">AI評価システム</span><br>を作ってみた
+    </div>
+    <div class="subtitle">
+      <strong>Claude Sonnet 4.6</strong> で学生の医療面接を自動評価<br>
+      月額300円 / 匿名化自動
+    </div>
+  </div>
+
+  <!-- 右側：UIモック -->
+  <div class="right">
+    <div class="mock-card mock-score">
+      <div class="mock-score-number">83</div>
+      <div class="mock-score-label">/ 100点</div>
+      <div class="mock-grade">A</div>
+    </div>
+    <div class="mock-card">
+      <div class="mock-bar-group">
+        <div class="mock-bar">
+          <div class="mock-bar-label">オープニング</div>
+          <div class="mock-bar-track"><div class="mock-bar-fill" style="width:85%"></div></div>
+          <div class="mock-bar-score">8.5/10</div>
+        </div>
+        <div class="mock-bar">
+          <div class="mock-bar-label">コミュニケーション</div>
+          <div class="mock-bar-track"><div class="mock-bar-fill" style="width:80%"></div></div>
+          <div class="mock-bar-score">20/25</div>
+        </div>
+        <div class="mock-bar">
+          <div class="mock-bar-label">医学的情報聴取</div>
+          <div class="mock-bar-track"><div class="mock-bar-fill green" style="width:87%"></div></div>
+          <div class="mock-bar-score">26/30</div>
+        </div>
+        <div class="mock-bar">
+          <div class="mock-bar-label">解釈モデル</div>
+          <div class="mock-bar-track"><div class="mock-bar-fill" style="width:80%"></div></div>
+          <div class="mock-bar-score">8/10</div>
+        </div>
+        <div class="mock-bar">
+          <div class="mock-bar-label">締めくくり</div>
+          <div class="mock-bar-track"><div class="mock-bar-fill green" style="width:90%"></div></div>
+          <div class="mock-bar-score">9/10</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

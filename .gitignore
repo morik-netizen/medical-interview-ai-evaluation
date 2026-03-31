@@ -1,0 +1,22 @@
+# APIキー・認証情報
+gas-project/.env
+gas-project/.clasp.json
+
+# 機密資料（教科書PDF、音声ファイル、テキスト抽出）
+reference/
+
+# OSファイル
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# エディタ
+.vscode/
+*.swp
+*.swo
+
+# Node
+node_modules/
+
+# メモリ（Claude Code用）
+.claude/

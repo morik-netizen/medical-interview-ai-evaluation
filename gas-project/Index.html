@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- ヘッダー -->
+  <div class="header">
+    <h1>医療面接 AI評価システム</h1>
+    <div class="subtitle">朝日医療大学校 柔道整復学科 臨床実習</div>
+  </div>
+
+  <!-- ステップ表示 -->
+  <div class="steps">
+    <div class="step active" id="stepIndicator1">1. テキスト入力</div>
+    <div class="step" id="stepIndicator2">2. 自己評価</div>
+    <div class="step" id="stepIndicator3">3. 評価結果</div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Step 1: テキスト入力 -->
+  <!-- ============================================================ -->
+  <div id="step1-input">
+
+    <!-- 学生選択 -->
+    <div class="card">
+      <h2>学生選択</h2>
+      <div class="form-row">
+        <div class="form-group">
+          <label>学生名</label>
+          <select id="studentSelect" onchange="onStudentChange()">
+            <option value="">-- 学生を選択 --</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>面接種別</label>
+          <div style="display:flex; gap:16px; padding-top:4px;">
+            <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+              <input type="radio" name="interviewType" value="real" checked> 実患者面接
+            </label>
+            <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+              <input type="radio" name="interviewType" value="roleplay"> 模擬面接
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- レベル選択 -->
+    <div class="card">
+      <h2>評価レベル</h2>
+      <div id="levelRecommendation" class="level-recommendation"></div>
+      <div class="level-selector">
+        <div class="level-option" data-level="1" onclick="selectLevel(1)">
+          <div class="level-name">Level 1</div>
+          <div class="level-desc">入門（10項目）<br>チェック数のみ</div>
+        </div>
+        <div class="level-option selected" data-level="2" onclick="selectLevel(2)">
+          <div class="level-name">Level 2</div>
+          <div class="level-desc">基本（30項目）<br>100点満点＋グレード</div>
+        </div>
+        <div class="level-option" data-level="3" onclick="selectLevel(3)">
+          <div class="level-name">Level 3</div>
+          <div class="level-desc">応用（68項目）<br>詳細分析＋自己省察</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- API使用量サマリー -->
+    <div class="card" id="usageSummaryCard">
+      <h2>API使用量</h2>
+      <div id="usageSummaryInline">
+        <div class="usage-inline-cards">
+          <div class="usage-inline-item">
+            <div class="usage-inline-value" id="inlineMonthCalls">--</div>
+            <div class="usage-inline-label">今月の評価回数</div>
+          </div>
+          <div class="usage-inline-item">
+            <div class="usage-inline-value" id="inlineMonthTokens">--</div>
+            <div class="usage-inline-label">今月のトークン</div>
+          </div>
+          <div class="usage-inline-item cost">
+            <div class="usage-inline-value" id="inlineMonthCost">--</div>
+            <div class="usage-inline-label">今月のコスト</div>
+          </div>
+          <div class="usage-inline-item">
+            <div class="usage-inline-value" id="inlineTotalCalls">--</div>
+            <div class="usage-inline-label">累計評価回数</div>
+          </div>
+          <div class="usage-inline-item">
+            <div class="usage-inline-value" id="inlineTotalTokens">--</div>
+            <div class="usage-inline-label">累計トークン</div>
+          </div>
+          <div class="usage-inline-item cost">
+            <div class="usage-inline-value" id="inlineTotalCost">--</div>
+            <div class="usage-inline-label">累計コスト</div>
+          </div>
+        </div>
+        <div class="usage-inline-model">Claude Sonnet 4.6 / 東京リージョン</div>
+      </div>
+    </div>
+
+    <!-- テキスト入力 -->
+    <div class="card">
+      <h2>面接テキスト</h2>
+      <div class="form-group">
+        <label>Plaudの匿名化済みテキストを入力してください</label>
+        <div class="hint">
+          Plaudの「医療面接匿名化テンプレート」で生成されたテキストを貼り付け、またはファイル読み込みしてください。
+        </div>
+
+        <!-- 入力方法の切り替え -->
+        <div class="input-method-tabs">
+          <button class="input-tab active" onclick="switchInputMethod('paste')">貼り付け</button>
+          <button class="input-tab" onclick="switchInputMethod('file')">ファイル読み込み</button>
+        </div>
+
+        <!-- 貼り付け入力 -->
+        <div id="pasteInput">
+          <textarea id="transcriptInput" placeholder="ここにPlaudの文字起こしテキストを貼り付けてください..."></textarea>
+        </div>
+
+        <!-- ファイル読み込み -->
+        <div id="fileInput" class="hidden">
+          <div class="file-drop-zone" id="dropZone">
+            <div class="file-drop-icon">📄</div>
+            <div class="file-drop-text">ファイルをドラッグ＆ドロップ<br>または</div>
+            <label class="btn btn-outline file-select-btn">
+              ファイルを選択
+              <input type="file" id="fileSelector" accept=".txt,.text,.srt,.csv" style="display:none;" onchange="handleFileSelect(event)">
+            </label>
+            <div class="file-drop-hint">対応形式: .txt, .srt, .csv</div>
+          </div>
+          <div id="fileInfo" class="file-info hidden">
+            <span id="fileName"></span>
+            <button class="btn-icon" onclick="clearFile()" title="ファイルを削除">✕</button>
+          </div>
+          <textarea id="transcriptInputFromFile" class="hidden" placeholder="ファイルの内容がここに表示されます..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-block" onclick="proceedToSelfEval()">
+      次へ：自己評価を入力する
+    </button>
+
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Step 2: 自己評価 -->
+  <!-- ============================================================ -->
+  <div id="step2-selfeval" class="hidden">
+
+    <div class="card">
+      <h2>自己評価</h2>
+      <p style="color: var(--text-light); margin-bottom: 16px;">
+        AI評価の前に、自分の面接を振り返って自己評価を入力してください。<br>
+        AI評価の後に「自己評価 vs AI評価」のギャップ分析が表示されます。
+      </p>
+      <div id="selfEvalContent">
+        <!-- JSで動的に生成 -->
+      </div>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn btn-outline" onclick="goToStep(1)">戻る</button>
+      <button class="btn btn-primary" style="flex:1;" onclick="runEvaluation()">
+        AI評価を実行する
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Step 3: 評価結果 -->
+  <!-- ============================================================ -->
+  <div id="step3-result" class="hidden">
+
+    <div id="resultContent">
+      <!-- JSで動的に生成 -->
+    </div>
+
+    <!-- 注意事項 -->
+    <div class="disclaimer">
+      ※ この評価はAI（Claude Sonnet 4.6）によるテキストベースの自動評価です。<br>
+      ※ 非言語コミュニケーション（表情・姿勢・声のトーン等）は評価対象外です。<br>
+      ※ 最終的な評価は教員が行います。この結果は参考・自己学習支援用です。
+    </div>
+
+    <!-- アクションボタン -->
+    <div class="btn-group" style="margin-top: 20px;">
+      <button class="btn btn-success" id="sendEmailBtn" onclick="sendEmail()">
+        結果をメールで送る
+      </button>
+      <button class="btn btn-outline" onclick="resetForm()">
+        新しい評価を開始
+      </button>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- ローディングオーバーレイ -->
+<!-- ============================================================ -->
+<div id="loadingOverlay" class="loading-overlay hidden">
+  <div class="loading-card">
+    <div class="loading-title">AI が面接テキストを分析しています</div>
+
+    <!-- プログレスバー -->
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-info">
+        <span class="progress-stage" id="progressStage">準備中...</span>
+        <span class="progress-percent" id="progressPercent">0%</span>
+      </div>
+    </div>
+
+    <!-- 豆知識 -->
+    <div class="loading-tip">
+      <div class="tip-label">豆知識</div>
+      <div class="tip-text" id="tipText">医療面接の診断寄与率は60〜80%と言われています</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- API使用量ダッシュボード -->
+<!-- ============================================================ -->
+<div id="dashboardModal" class="modal-overlay hidden" onclick="closeDashboardOnOverlay(event)">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>API使用量ダッシュボード</h2>
+      <button class="btn-icon" onclick="closeDashboard()">✕</button>
+    </div>
+    <div id="dashboardBody">
+      <div style="text-align:center; padding:40px; color:#999;">読み込み中...</div>
+    </div>
+  </div>
+</div>
+
+<?!= include('JavaScript'); ?>
+
+</body>
+</html>

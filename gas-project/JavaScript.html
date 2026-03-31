@@ -1,0 +1,1136 @@
+<script>
+/* ============================================================
+   医療面接AI評価システム - クライアントサイドJS
+   ============================================================ */
+
+// ============================================================
+// 状態管理
+// ============================================================
+
+var appState = {
+  currentStep: 1,       // 1:入力, 2:自己評価, 3:結果
+  selectedLevel: 2,
+  recommendedLevel: 1,
+  students: [],
+  selectedStudentEmail: '',
+  lastResult: null,
+  inputMethod: 'paste'  // 'paste' or 'file'
+};
+
+// Web Speech API 対応チェック
+var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+var speechSupported = !!SpeechRecognition;
+var activeRecognition = null; // 現在動作中の音声認識インスタンス
+
+// ============================================================
+// テキスト入力方法切り替え・ファイル読み込み
+// ============================================================
+
+function switchInputMethod(method) {
+  appState.inputMethod = method;
+  document.querySelectorAll('.input-tab').forEach(function(tab) {
+    tab.classList.toggle('active', tab.textContent.trim() === (method === 'paste' ? '貼り付け' : 'ファイル読み込み'));
+  });
+  document.getElementById('pasteInput').classList.toggle('hidden', method !== 'paste');
+  document.getElementById('fileInput').classList.toggle('hidden', method !== 'file');
+}
+
+function handleFileSelect(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  readFile(file);
+}
+
+function readFile(file) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var text = e.target.result;
+    document.getElementById('transcriptInputFromFile').value = text;
+    document.getElementById('transcriptInputFromFile').classList.remove('hidden');
+    document.getElementById('fileName').textContent = file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+    document.getElementById('fileInfo').classList.remove('hidden');
+    document.getElementById('dropZone').classList.add('hidden');
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function clearFile() {
+  document.getElementById('transcriptInputFromFile').value = '';
+  document.getElementById('transcriptInputFromFile').classList.add('hidden');
+  document.getElementById('fileInfo').classList.add('hidden');
+  document.getElementById('dropZone').classList.remove('hidden');
+  document.getElementById('fileSelector').value = '';
+}
+
+/** 現在の入力方法に応じてテキストを取得 */
+function getTranscriptText() {
+  if (appState.inputMethod === 'file') {
+    return (document.getElementById('transcriptInputFromFile').value || '').trim();
+  }
+  return (document.getElementById('transcriptInput').value || '').trim();
+}
+
+// ============================================================
+// 初期化
+// ============================================================
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadStudents();
+  setupDragAndDrop();
+  loadUsageSummary();
+});
+
+function loadUsageSummary() {
+  google.script.run
+    .withSuccessHandler(function(data) {
+      var el = function(id) { return document.getElementById(id); };
+      el('inlineMonthCalls').textContent = (data.monthCalls || 0) + '回';
+      el('inlineMonthTokens').textContent = formatTokens(data.monthTokens || 0);
+      el('inlineMonthCost').textContent = (data.monthCostJpy || 0) + '円';
+      el('inlineTotalCalls').textContent = (data.totalCalls || 0) + '回';
+      el('inlineTotalTokens').textContent = formatTokens(data.totalTokens || 0);
+      el('inlineTotalCost').textContent = (data.totalCostJpy || 0) + '円';
+    })
+    .withFailureHandler(function() {
+      // エラー時は「--」のまま
+    })
+    .getApiUsageSummary();
+}
+
+function setupDragAndDrop() {
+  var dropZone = document.getElementById('dropZone');
+  if (!dropZone) return;
+
+  ['dragenter', 'dragover'].forEach(function(evt) {
+    dropZone.addEventListener(evt, function(e) {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(function(evt) {
+    dropZone.addEventListener(evt, function(e) {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+    });
+  });
+
+  dropZone.addEventListener('drop', function(e) {
+    var files = e.dataTransfer.files;
+    if (files.length > 0) readFile(files[0]);
+  });
+}
+
+function loadStudents() {
+  google.script.run
+    .withSuccessHandler(function(students) {
+      appState.students = students || [];
+      var sel = document.getElementById('studentSelect');
+      sel.innerHTML = '<option value="">-- 学生を選択 --</option>';
+      students.forEach(function(s) {
+        var opt = document.createElement('option');
+        opt.value = s.name;
+        opt.textContent = (s.studentId ? s.studentId + ' ' : '') + s.name;
+        opt.setAttribute('data-email', s.email || '');
+        opt.setAttribute('data-student-id', s.studentId || '');
+        sel.appendChild(opt);
+      });
+    })
+    .withFailureHandler(function(err) {
+      console.error('学生リスト取得エラー:', err);
+    })
+    .getStudentList();
+}
+
+// ============================================================
+// 学生選択
+// ============================================================
+
+function onStudentChange() {
+  var sel = document.getElementById('studentSelect');
+  var selectedOpt = sel.options[sel.selectedIndex];
+  appState.selectedStudentEmail = selectedOpt ? selectedOpt.getAttribute('data-email') || '' : '';
+
+  // 履歴からレベル推奨を取得
+  var studentName = sel.value;
+  if (studentName) {
+    google.script.run
+      .withSuccessHandler(function(history) {
+        appState.recommendedLevel = getRecommendedLevel(history || []);
+        updateLevelRecommendation();
+      })
+      .getStudentHistory(studentName);
+  }
+}
+
+function getRecommendedLevel(history) {
+  if (history.length === 0) return 1;
+
+  var level1Results = history.filter(function(h) { return h.level === 1; });
+  var level1High = level1Results.filter(function(h) { return h.totalScore >= 8; }).length;
+
+  if (level1High >= 3) {
+    var level2Results = history.filter(function(h) { return h.level === 2; });
+    var level2High = level2Results.filter(function(h) { return h.totalScore >= 80; }).length;
+    if (level2High >= 3) return 3;
+    return 2;
+  }
+  return 1;
+}
+
+function updateLevelRecommendation() {
+  var el = document.getElementById('levelRecommendation');
+  if (el) {
+    var rec = appState.recommendedLevel;
+    el.textContent = '推奨: Level ' + rec + (rec === 1 ? '（入門）' : rec === 2 ? '（基本）' : '（応用）');
+  }
+}
+
+// ============================================================
+// レベル選択
+// ============================================================
+
+function selectLevel(level) {
+  appState.selectedLevel = level;
+  var options = document.querySelectorAll('.level-option');
+  options.forEach(function(opt) {
+    opt.classList.toggle('selected', parseInt(opt.getAttribute('data-level')) === level);
+  });
+  updateSelfEvalForm();
+}
+
+// ============================================================
+// ステップ遷移
+// ============================================================
+
+function goToStep(step) {
+  appState.currentStep = step;
+
+  // ステップ表示を更新
+  document.querySelectorAll('.step').forEach(function(el, i) {
+    el.classList.remove('active', 'done');
+    if (i + 1 === step) el.classList.add('active');
+    else if (i + 1 < step) el.classList.add('done');
+  });
+
+  // セクション表示切り替え
+  document.getElementById('step1-input').classList.toggle('hidden', step !== 1);
+  document.getElementById('step2-selfeval').classList.toggle('hidden', step !== 2);
+  document.getElementById('step3-result').classList.toggle('hidden', step !== 3);
+
+  // 自己評価フォーム更新
+  if (step === 2) {
+    updateSelfEvalForm();
+  }
+}
+
+// ============================================================
+// 自己評価フォーム
+// ============================================================
+
+function updateSelfEvalForm() {
+  var container = document.getElementById('selfEvalContent');
+  var level = appState.selectedLevel;
+
+  if (level === 1) {
+    container.innerHTML = buildLevel1SelfEval();
+  } else if (level === 2) {
+    container.innerHTML = buildLevel2SelfEval();
+  } else {
+    container.innerHTML = buildLevel3SelfEval();
+  }
+}
+
+function buildLevel1SelfEval() {
+  var items = [
+    { id: 1, name: '挨拶をした' },
+    { id: 2, name: '自己紹介をした' },
+    { id: 3, name: '患者の名前を確認した' },
+    { id: 4, name: '面接の目的を説明した' },
+    { id: 5, name: '開かれた質問を使った' },
+    { id: 6, name: '共感の言葉を述べた' },
+    { id: 7, name: '促し・あいづちをした' },
+    { id: 8, name: '主訴を把握した' },
+    { id: 9, name: '要約した' },
+    { id: 10, name: '締めの挨拶をした' }
+  ];
+
+  var html = '<h3>できたと思う項目にチェックしてください</h3>';
+  html += '<div class="checkbox-group">';
+  items.forEach(function(item) {
+    html += '<label class="checkbox-item">';
+    html += '<input type="checkbox" id="selfCheck_' + item.id + '" value="' + item.id + '">';
+    html += '<span>' + item.id + '. ' + item.name + '</span>';
+    html += '</label>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function buildLevel2SelfEval() {
+  var categories = [
+    { key: 'opening', label: 'オープニング（挨拶・自己紹介・確認・同意）' },
+    { key: 'communication', label: 'コミュニケーション技法（傾聴・共感・質問技法）' },
+    { key: 'medicalInfo', label: '医学的情報の聴取（主訴・現病歴・既往歴等）' },
+    { key: 'interpretationModel', label: '解釈モデルの聴取（患者の理解・心配・希望）' },
+    { key: 'closing', label: '締めくくり（要約・確認・挨拶）' },
+    { key: 'structure', label: '面接の構造・流れ（Step1→2→3→4）' }
+  ];
+
+  var html = '<h3>各カテゴリの出来を5段階で自己評価してください</h3>';
+  categories.forEach(function(cat) {
+    html += '<div class="form-group">';
+    html += '<label>' + cat.label + '</label>';
+    html += '<div style="display:flex; gap:8px; align-items:center;">';
+    html += '<span style="font-size:0.85em; color:#999;">できなかった</span>';
+    for (var i = 1; i <= 5; i++) {
+      html += '<label style="cursor:pointer; text-align:center;">';
+      html += '<input type="radio" name="selfCat_' + cat.key + '" value="' + i + '"' + (i === 3 ? ' checked' : '') + '>';
+      html += '<div>' + i + '</div>';
+      html += '</label>';
+    }
+    html += '<span style="font-size:0.85em; color:#999;">よくできた</span>';
+    html += '</div></div>';
+  });
+  html += buildVoiceTextarea('selfFreeComment', '自由記述（任意）', '面接で感じたこと、気づいたことなど', 3);
+  return html;
+}
+
+function buildLevel3SelfEval() {
+  var html = buildLevel2SelfEval();
+  html += buildVoiceTextarea('selfFocusPoint', '意識して取り組んだこと', '今回の面接で特に意識したことは何ですか？', 2);
+  html += buildVoiceTextarea('selfDifficulty', 'うまくいかなかった場面', '難しかった場面や、もっとこうすればよかったと思う場面は？', 2);
+  return html;
+}
+
+/**
+ * 音声入力ボタン付きテキストエリアを生成
+ */
+function buildVoiceTextarea(id, label, placeholder, rows) {
+  var html = '<div class="form-group">';
+  html += '<label>' + label + '</label>';
+  html += '<div class="voice-textarea-wrapper">';
+  html += '<textarea id="' + id + '" rows="' + (rows || 3) + '" placeholder="' + placeholder + '"></textarea>';
+  if (speechSupported) {
+    html += '<button type="button" class="btn-mic" onclick="toggleVoiceInput(\'' + id + '\', this)" title="音声入力">';
+    html += '<span class="mic-icon">🎤</span>';
+    html += '</button>';
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function collectSelfEval() {
+  var level = appState.selectedLevel;
+
+  if (level === 1) {
+    var checks = {};
+    for (var i = 1; i <= 10; i++) {
+      var cb = document.getElementById('selfCheck_' + i);
+      if (cb) checks[i] = cb.checked;
+    }
+    return { checks: checks };
+  }
+
+  // Level 2/3
+  var categoryKeys = ['opening', 'communication', 'medicalInfo', 'interpretationModel', 'closing', 'structure'];
+  var categoryScores = {};
+  categoryKeys.forEach(function(key) {
+    var radios = document.getElementsByName('selfCat_' + key);
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].checked) {
+        categoryScores[key] = parseInt(radios[i].value);
+        break;
+      }
+    }
+  });
+
+  var result = {
+    categoryScores: categoryScores,
+    freeComment: (document.getElementById('selfFreeComment') || {}).value || ''
+  };
+
+  if (level === 3) {
+    result.focusPoint = (document.getElementById('selfFocusPoint') || {}).value || '';
+    result.difficulty = (document.getElementById('selfDifficulty') || {}).value || '';
+  }
+
+  return result;
+}
+
+// ============================================================
+// Step1 → Step2 遷移（バリデーション）
+// ============================================================
+
+function proceedToSelfEval() {
+  var studentName = document.getElementById('studentSelect').value;
+  if (!studentName) {
+    showToast('学生を選択してください', 'error');
+    return;
+  }
+
+  var transcript = getTranscriptText();
+  if (!transcript) {
+    showToast('面接テキストを入力してください（貼り付けまたはファイル読み込み）', 'error');
+    return;
+  }
+
+  if (transcript.length < 50) {
+    showToast('テキストが短すぎます。Plaudの文字起こしテキストを入力してください', 'error');
+    return;
+  }
+
+  goToStep(2);
+}
+
+// ============================================================
+// 評価実行
+// ============================================================
+
+function runEvaluation() {
+  var selfEval = collectSelfEval();
+
+  var params = {
+    transcript: getTranscriptText(),
+    level: appState.selectedLevel,
+    selfEval: selfEval,
+    interviewType: document.querySelector('input[name="interviewType"]:checked').value,
+    studentName: document.getElementById('studentSelect').value
+  };
+
+  // ローディング表示
+  showLoading();
+
+  google.script.run
+    .withSuccessHandler(function(raw) {
+      hideLoading();
+      try {
+        // GASがJSON文字列またはオブジェクトで返す場合の両方に対応
+        var response = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+        if (response.success) {
+          appState.lastResult = response.data;
+          displayResult(response.data);
+          goToStep(3);
+        } else {
+          showToast('評価エラー: ' + (response.error || '不明なエラー'), 'error');
+        }
+      } catch (e) {
+        console.error('レスポンス処理エラー:', e);
+        showToast('結果の表示に問題が発生しました: ' + e.message, 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      hideLoading();
+      showToast('通信エラー: ' + err.message, 'error');
+    })
+    .evaluateInterview(params);
+}
+
+// ============================================================
+// 結果表示
+// ============================================================
+
+function displayResult(result) {
+  var container = document.getElementById('resultContent');
+  var eval_ = result.evaluation || {};
+  var meta = result.meta || {};
+  var gap = result.gapAnalysis || {};
+  var level = meta.level || appState.selectedLevel;
+
+  var html = '';
+
+  if (level === 1) {
+    html = buildLevel1Result(eval_, gap);
+  } else {
+    html = buildLevel2Result(eval_, gap, level);
+  }
+
+  container.innerHTML = html;
+
+  // 折りたたみ初期化
+  initCollapsibles();
+}
+
+function buildLevel1Result(eval_, gap) {
+  var checkCount = eval_.checkCount || 0;
+  var totalItems = eval_.totalItems || 10;
+
+  var html = '';
+
+  // スコアカード
+  html += '<div class="score-card level1">';
+  html += '<div class="score-big">' + checkCount + ' / ' + totalItems + '</div>';
+  html += '<div class="score-label">できました！</div>';
+  html += '</div>';
+
+  // 次のアクション
+  if (eval_.nextAction) {
+    html += '<div class="action-card">';
+    html += '<h3>次にチャレンジ！</h3>';
+    html += '<p><strong>' + escapeHtml(eval_.nextAction.title || '') + '</strong></p>';
+    if (eval_.nextAction.script) {
+      html += '<div class="script-box">💬 ' + escapeHtml(eval_.nextAction.script) + '</div>';
+    }
+    if (eval_.nextAction.tip) {
+      html += '<p>💡 ' + escapeHtml(eval_.nextAction.tip) + '</p>';
+    }
+    html += '</div>';
+  }
+
+  // ギャップ分析
+  if (gap && gap.available) {
+    html += buildGapSection(gap);
+  }
+
+  // できた項目（折りたたみ）
+  if (eval_.itemEvaluations && eval_.itemEvaluations.length > 0) {
+    html += '<div class="collapsible">';
+    html += '<div class="collapsible-header"><span class="arrow">▶</span> 項目別結果</div>';
+    html += '<div class="collapsible-body">';
+    html += buildItemTable(eval_.itemEvaluations, true);
+    html += '</div></div>';
+  }
+
+  // 良かった点（折りたたみ）
+  if (eval_.strengths && eval_.strengths.length > 0) {
+    html += '<div class="collapsible">';
+    html += '<div class="collapsible-header"><span class="arrow">▶</span> できたこと</div>';
+    html += '<div class="collapsible-body">';
+    html += '<ul>';
+    eval_.strengths.forEach(function(s) {
+      html += '<li><strong>' + escapeHtml(s.point || '') + '</strong><br>' + escapeHtml(s.detail || '') + '</li>';
+    });
+    html += '</ul></div></div>';
+  }
+
+  // 総合コメント
+  if (eval_.overallComment) {
+    html += '<div class="card"><p>' + escapeHtml(eval_.overallComment) + '</p></div>';
+  }
+
+  return html;
+}
+
+function buildLevel2Result(eval_, gap, level) {
+  var html = '';
+
+  // スコアカード
+  var gradeClass = eval_.grade === '成長中' ? 'grade-growing' : 'grade-' + eval_.grade;
+  html += '<div class="score-card ' + (level === 3 ? 'level3' : 'level2') + '">';
+  html += '<div class="score-big">' + (eval_.totalScore || '---') + '</div>';
+  html += '<div class="score-label">/ 100点</div>';
+  html += '<span class="grade-badge ' + gradeClass + '">' + escapeHtml(eval_.grade || '') + '</span>';
+  html += '</div>';
+
+  // カテゴリ別バー
+  if (eval_.categoryScores) {
+    html += '<div class="card"><h2>カテゴリ別スコア</h2>';
+    var cats = Object.keys(eval_.categoryScores);
+    cats.forEach(function(key) {
+      var cat = eval_.categoryScores[key];
+      var pct = cat.maxScore > 0 ? Math.round(cat.score / cat.maxScore * 100) : 0;
+      html += '<div class="category-bar">';
+      html += '<div class="bar-label"><span>' + escapeHtml(cat.label || key) + '</span>';
+      html += '<span>' + cat.score + ' / ' + cat.maxScore + '</span></div>';
+      html += '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // 最優先アクション
+  if (eval_.topPriority) {
+    html += '<div class="action-card">';
+    html += '<h3>⚡ 最優先アクション</h3>';
+    html += '<p>' + escapeHtml(eval_.topPriority) + '</p>';
+    html += '</div>';
+  }
+
+  // ギャップ分析
+  if (gap && gap.available) {
+    html += buildGapSection(gap);
+  }
+
+  // 自己省察の問い（Level 3）
+  if (level === 3 && eval_.reflectionQuestions && eval_.reflectionQuestions.length > 0) {
+    html += '<div class="card"><h2>自己省察のための問い</h2>';
+    eval_.reflectionQuestions.forEach(function(q, i) {
+      html += '<div class="reflection-question">';
+      html += '<div class="question">Q' + (i + 1) + '. ' + escapeHtml(q.question || '') + '</div>';
+      if (q.hint) {
+        html += '<div class="collapsible" style="margin-top:8px;">';
+        html += '<div class="collapsible-header"><span class="arrow">▶</span> ヒントを見る</div>';
+        html += '<div class="collapsible-body"><p>' + escapeHtml(q.hint) + '</p></div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // 良かった点（折りたたみ）
+  if (eval_.strengths && eval_.strengths.length > 0) {
+    html += '<div class="collapsible open">';
+    html += '<div class="collapsible-header"><span class="arrow">▶</span> 良かった点</div>';
+    html += '<div class="collapsible-body"><ol>';
+    eval_.strengths.forEach(function(s) {
+      html += '<li><strong>' + escapeHtml(s.point || '') + '</strong><br>';
+      html += escapeHtml(s.detail || '');
+      if (s.reference) html += '<br><em style="color:#999;">参照: ' + escapeHtml(s.reference) + '</em>';
+      html += '</li>';
+    });
+    html += '</ol></div></div>';
+  }
+
+  // 改善点（折りたたみ）
+  if (eval_.improvements && eval_.improvements.length > 0) {
+    html += '<div class="collapsible">';
+    html += '<div class="collapsible-header"><span class="arrow">▶</span> 改善点とアドバイス</div>';
+    html += '<div class="collapsible-body"><ol>';
+    eval_.improvements.forEach(function(imp) {
+      html += '<li><strong>' + escapeHtml(imp.point || '') + '</strong><br>';
+      html += escapeHtml(imp.detail || '');
+      if (imp.example) {
+        html += '<div class="script-box">💬 ' + escapeHtml(imp.example) + '</div>';
+      }
+      if (imp.reference) html += '<em style="color:#999;">参照: ' + escapeHtml(imp.reference) + '</em>';
+      html += '</li>';
+    });
+    html += '</ol></div></div>';
+  }
+
+  // 対話分析（折りたたみ）
+  if (eval_.dialogueAnalysis) {
+    var da = eval_.dialogueAnalysis;
+    html += '<div class="collapsible">';
+    html += '<div class="collapsible-header"><span class="arrow">▶</span> 対話分析</div>';
+    html += '<div class="collapsible-body">';
+    html += '<table class="item-table">';
+    html += '<tr><td>術者の発話数</td><td>' + (da.practitionerUtterances || '-') + '回</td></tr>';
+    html += '<tr><td>患者の発話数</td><td>' + (da.patientUtterances || '-') + '回</td></tr>';
+    html += '<tr><td>開かれた質問（OQ）</td><td>' + (da.openQuestionCount || '-') + '回</td></tr>';
+    html += '<tr><td>閉ざされた質問（CQ）</td><td>' + (da.closedQuestionCount || '-') + '回</td></tr>';
+    html += '<tr><td>OQ:CQ 比率</td><td>' + (da.oqCqRatio || '-') + '</td></tr>';
+    html += '<tr><td>共感表現</td><td>' + (da.empathyCount || '-') + '回</td></tr>';
+    html += '<tr><td>繰り返し</td><td>' + (da.reflectionCount || '-') + '回</td></tr>';
+    html += '<tr><td>要約</td><td>' + (da.summaryCount || '-') + '回</td></tr>';
+    html += '<tr><td>促し・あいづち</td><td>' + (da.facilitationCount || '-') + '回</td></tr>';
+    html += '</table></div></div>';
+  }
+
+  // 項目別評価（折りたたみ）
+  if (eval_.itemEvaluations && eval_.itemEvaluations.length > 0) {
+    html += '<div class="collapsible">';
+    html += '<div class="collapsible-header"><span class="arrow">▶</span> 項目別評価（全' + eval_.itemEvaluations.length + '項目）</div>';
+    html += '<div class="collapsible-body">';
+    html += buildItemTable(eval_.itemEvaluations, false);
+    html += '</div></div>';
+  }
+
+  // 総合コメント
+  if (eval_.overallComment) {
+    html += '<div class="card"><h2>総合コメント</h2><p>' + escapeHtml(eval_.overallComment) + '</p></div>';
+  }
+
+  // 次回目標
+  if (eval_.nextGoals && eval_.nextGoals.length > 0) {
+    html += '<div class="card"><h2>次回の目標</h2><ul>';
+    eval_.nextGoals.forEach(function(g) {
+      html += '<li>' + escapeHtml(g) + '</li>';
+    });
+    html += '</ul></div>';
+  }
+
+  return html;
+}
+
+// ============================================================
+// 共通パーツ
+// ============================================================
+
+function buildGapSection(gap) {
+  var html = '<div class="gap-section">';
+  html += '<h3>自己評価 vs AI評価</h3>';
+  html += '<div class="gap-match-rate">一致率: ' + gap.matchRate + '%</div>';
+
+  if (gap.gaps && gap.gaps.length > 0) {
+    gap.gaps.forEach(function(g) {
+      var typeLabel = '';
+      var typeClass = '';
+      if (g.type === 'self_high') {
+        typeLabel = '自己高・AI低';
+        typeClass = 'gap-self-high';
+      } else if (g.type === 'self_low') {
+        typeLabel = '自己低・AI高 ✨';
+        typeClass = 'gap-self-low';
+      } else {
+        typeLabel = '一致';
+        typeClass = '';
+      }
+      html += '<div class="gap-item">';
+      html += '<span>' + escapeHtml(g.label || g.category || g.itemName || '') + '</span>';
+      html += '<span class="' + typeClass + '">' + typeLabel + '</span>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+  return html;
+}
+
+function buildItemTable(items, simple) {
+  var html = '<table class="item-table">';
+  if (simple) {
+    html += '<tr><th></th><th>項目</th><th>判定</th></tr>';
+  } else {
+    html += '<tr><th></th><th>項目</th><th>判定</th><th>根拠</th></tr>';
+  }
+
+  items.forEach(function(item) {
+    var icon = item.result === 'Good' ? '✅' : (item.result === 'Partial' ? '🔶' : '➖');
+    var cls = item.result === 'Good' ? 'result-good' : (item.result === 'Partial' ? 'result-partial' : 'result-poor');
+    html += '<tr>';
+    html += '<td>' + icon + '</td>';
+    html += '<td>' + escapeHtml(item.name || '') + '</td>';
+    html += '<td class="' + cls + '">' + escapeHtml(item.result || '') + '</td>';
+    if (!simple) {
+      html += '<td style="font-size:0.85em; color:#666;">' + escapeHtml(item.evidence || '') + '</td>';
+    }
+    html += '</tr>';
+  });
+  html += '</table>';
+  return html;
+}
+
+// ============================================================
+// メール送信
+// ============================================================
+
+function sendEmail() {
+  if (!appState.lastResult) {
+    showToast('送信する評価結果がありません', 'error');
+    return;
+  }
+
+  var studentName = document.getElementById('studentSelect').value;
+  if (!appState.selectedStudentEmail) {
+    showToast('学生のメールアドレスが登録されていません', 'error');
+    return;
+  }
+
+  var btn = document.getElementById('sendEmailBtn');
+  btn.disabled = true;
+  btn.textContent = '送信中...';
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      btn.disabled = false;
+      btn.textContent = '結果をメールで送る';
+      if (response.success) {
+        showToast(studentName + ' にメール送信しました', 'success');
+      } else {
+        showToast('送信失敗: ' + (response.error || ''), 'error');
+      }
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      btn.textContent = '結果をメールで送る';
+      showToast('通信エラー: ' + err.message, 'error');
+    })
+    .sendResultEmail({
+      studentName: studentName,
+      email: appState.selectedStudentEmail,
+      result: appState.lastResult,
+      level: appState.selectedLevel
+    });
+}
+
+// ============================================================
+// ローディング
+// ============================================================
+
+var TIPS = [
+  // 一般的な豆知識
+  { label: '💡 豆知識', text: '医療面接の診断寄与率は60〜80%と言われています' },
+  { label: '💡 豆知識', text: '非言語コミュニケーションは全体の2/3を占めています' },
+  { label: '💡 ポイント', text: '面接は4ステップ：導入→展開→掘り下げ→終了' },
+
+  // テクニック
+  { label: '💡 テクニック', text: '「繰り返し」は患者の言葉をそのまま反復するだけでOK！' },
+  { label: '💡 テクニック', text: '連呼法：患者の名前を5回以上呼ぶとラポール形成に効果的' },
+  { label: '💡 テクニック', text: '沈黙は患者の発言を促す強力なツール（サイレントフォーカス）' },
+  { label: '💡 ポイント', text: '開かれた質問（OQ）は面接前半で使うと効果的です' },
+  { label: '💡 豆知識', text: 'LET\'S HEARフレームワークで解釈モデルを網羅できます' },
+
+  // LET'S HEAR フレームワーク（p.69-70）
+  { label: '📖 解釈モデル', text: 'L（Label）：患者は何を一番問題だと思っているのか？ 例「ご自身ではどんな状態だと思いますか？」' },
+  { label: '📖 解釈モデル', text: 'E（Etiology）：何か思い当たる原因があるか？ 例「原因は何だとお思いですか？」' },
+  { label: '📖 解釈モデル', text: 'T（Timing）：どのくらいの期間、問題を抱えているのか？ 例「いつ頃から気になっていますか？」' },
+  { label: '📖 解釈モデル', text: 'S（Severity）：どの程度のひどさだと思っているのか？ 例「ご自身ではどのくらい重いと感じますか？」' },
+  { label: '📖 解釈モデル', text: 'H（History）：何もしないとどうなりそうか？ 例「放っておくとどうなると思いますか？」' },
+  { label: '📖 解釈モデル', text: 'E（Effects）：その症候のために今何が一番困っているか？ 例「日常生活で一番困っていることは？」' },
+  { label: '📖 解釈モデル', text: 'A（Affects）：今何が一番心配なのか？ 例「一番心配されていることは何ですか？」' },
+  { label: '📖 解釈モデル', text: 'R（Rx）：どんな施術を望んでいるか？ 例「どのような施術を望まれていますか？」' }
+];
+
+var progressTimer = null;
+var slowTimer = null;
+var tipRotateTimer = null;
+var currentPercent = 0;
+
+var PROGRESS_STAGES = [
+  { percent: 5,  text: 'テキストを解析中...' },
+  { percent: 12, text: '面接の構造を分析中...' },
+  { percent: 20, text: 'プロンプトを構築中...' },
+  { percent: 30, text: 'AIに送信中...' },
+  { percent: 40, text: 'AI が評価を生成中...' },
+  { percent: 50, text: 'コミュニケーション技法を分析中...' },
+  { percent: 58, text: '医学的情報の聴取を評価中...' },
+  { percent: 65, text: '解釈モデルを確認中...' },
+  { percent: 72, text: 'スコアを計算中...' },
+  { percent: 78, text: 'フィードバックを作成中...' },
+  { percent: 84, text: '改善アドバイスを生成中...' },
+  { percent: 90, text: 'もう少しで完了...' }
+];
+
+function showLoading() {
+  var overlay = document.getElementById('loadingOverlay');
+  overlay.classList.remove('hidden');
+  currentPercent = 0;
+  updateProgress(0, '準備中...');
+  rotateTip();
+
+  // メインステージ（最初の25秒で90%まで）
+  var stageIndex = 0;
+  var intervalMs = 25000 / PROGRESS_STAGES.length;
+
+  progressTimer = setInterval(function() {
+    if (stageIndex < PROGRESS_STAGES.length) {
+      var stage = PROGRESS_STAGES[stageIndex];
+      currentPercent = stage.percent;
+      updateProgress(stage.percent, stage.text);
+      stageIndex++;
+    } else {
+      clearInterval(progressTimer);
+      progressTimer = null;
+      // 90%以降もゆっくり進み続ける（A: 止まらない）
+      startSlowProgress();
+    }
+  }, intervalMs);
+
+  // 豆知識を3秒ごとにローテーション（C: より頻繁に）
+  tipRotateTimer = setInterval(rotateTip, 3000);
+}
+
+/** 90%以降、1秒ごとに0.3%ずつ進む（99%で停止） */
+function startSlowProgress() {
+  var slowTexts = [
+    'もう少しで完了...',
+    '結果を整理中...',
+    '最終チェック中...',
+    'あと少しお待ちください...',
+    '詳細レポートを準備中...'
+  ];
+  var textIndex = 0;
+
+  slowTimer = setInterval(function() {
+    if (currentPercent < 99) {
+      currentPercent += 0.3;
+      var text = slowTexts[textIndex % slowTexts.length];
+      updateProgress(currentPercent, text);
+
+      if (Math.floor(currentPercent) % 2 === 0) {
+        textIndex++;
+      }
+    }
+  }, 1000);
+}
+
+function hideLoading() {
+  // 100%にしてからフェードアウト
+  currentPercent = 100;
+  updateProgress(100, '完了！');
+
+  clearInterval(progressTimer);
+  clearInterval(slowTimer);
+  clearInterval(tipRotateTimer);
+  progressTimer = null;
+  slowTimer = null;
+  tipRotateTimer = null;
+
+  setTimeout(function() {
+    document.getElementById('loadingOverlay').classList.add('hidden');
+    currentPercent = 0;
+    updateProgress(0, '準備中...');
+  }, 600);
+}
+
+function updateProgress(percent, stageText) {
+  var fill = document.getElementById('progressFill');
+  var bar = fill ? fill.parentElement : null;
+  var percentEl = document.getElementById('progressPercent');
+  var stageEl = document.getElementById('progressStage');
+  if (fill) fill.style.width = Math.min(percent, 100) + '%';
+  if (percentEl) percentEl.textContent = Math.round(percent) + '%';
+  if (stageEl) stageEl.textContent = stageText;
+  // 90%以降はパルスエフェクト
+  if (bar) bar.classList.toggle('pulse', percent >= 90 && percent < 100);
+}
+
+function rotateTip() {
+  var tip = TIPS[Math.floor(Math.random() * TIPS.length)];
+  var tipText = document.getElementById('tipText');
+  if (tipText) tipText.textContent = tip.label + ' ' + tip.text;
+}
+
+// ============================================================
+// 折りたたみ
+// ============================================================
+
+function initCollapsibles() {
+  document.querySelectorAll('.collapsible-header').forEach(function(header) {
+    header.removeEventListener('click', toggleCollapsible);
+    header.addEventListener('click', toggleCollapsible);
+  });
+}
+
+function toggleCollapsible() {
+  var parent = this.parentElement;
+  parent.classList.toggle('open');
+}
+
+// ============================================================
+// トースト通知
+// ============================================================
+
+function showToast(message, type) {
+  // 既存のトーストを削除
+  var existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+
+  var toast = document.createElement('div');
+  toast.className = 'toast ' + (type || 'success');
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  setTimeout(function() { toast.remove(); }, 4000);
+}
+
+// ============================================================
+// 新しい評価を開始
+// ============================================================
+
+function resetForm() {
+  document.getElementById('transcriptInput').value = '';
+  appState.lastResult = null;
+  goToStep(1);
+}
+
+// ============================================================
+// ユーティリティ
+// ============================================================
+
+function escapeHtml(str) {
+  if (!str) return '';
+  var div = document.createElement('div');
+  div.textContent = String(str);
+  return div.innerHTML;
+}
+
+// ============================================================
+// 音声入力（Web Speech API）
+// ============================================================
+
+/**
+ * 音声入力の開始/停止を切り替える
+ * @param {string} textareaId - 対象テキストエリアのID
+ * @param {HTMLElement} btn - マイクボタン要素
+ */
+function toggleVoiceInput(textareaId, btn) {
+  if (!speechSupported) {
+    showToast('このブラウザは音声入力に対応していません', 'error');
+    return;
+  }
+
+  // 既に録音中なら停止
+  if (activeRecognition && btn.classList.contains('recording')) {
+    activeRecognition.stop();
+    return;
+  }
+
+  // 他の録音中ボタンがあれば停止
+  if (activeRecognition) {
+    activeRecognition.stop();
+  }
+
+  var textarea = document.getElementById(textareaId);
+  if (!textarea) return;
+
+  var recognition = new SpeechRecognition();
+  recognition.lang = 'ja-JP';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  var finalTranscript = textarea.value;
+
+  btn.classList.add('recording');
+  btn.querySelector('.mic-icon').textContent = '⏹';
+  activeRecognition = recognition;
+
+  recognition.onresult = function(event) {
+    var interim = '';
+    for (var i = event.resultIndex; i < event.results.length; i++) {
+      var transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalTranscript += transcript;
+      } else {
+        interim = transcript;
+      }
+    }
+    textarea.value = finalTranscript + interim;
+    // テキストエリアを最下部にスクロール
+    textarea.scrollTop = textarea.scrollHeight;
+  };
+
+  recognition.onerror = function(event) {
+    if (event.error === 'no-speech') {
+      // 無音エラーは無視（再試行される）
+      return;
+    }
+    stopRecording(btn);
+    if (event.error === 'not-allowed') {
+      showToast('マイクの使用が許可されていません。ブラウザの設定を確認してください', 'error');
+    } else {
+      showToast('音声入力エラー: ' + event.error, 'error');
+    }
+  };
+
+  recognition.onend = function() {
+    // 録音中フラグがまだあれば自動再開（ブラウザが自動停止した場合）
+    if (btn.classList.contains('recording')) {
+      try {
+        recognition.start();
+      } catch (e) {
+        stopRecording(btn);
+      }
+    }
+  };
+
+  try {
+    recognition.start();
+    showToast('音声入力を開始しました。話し終わったら⏹を押してください', 'success');
+  } catch (e) {
+    stopRecording(btn);
+    showToast('音声入力を開始できませんでした', 'error');
+  }
+}
+
+function stopRecording(btn) {
+  if (btn) {
+    btn.classList.remove('recording');
+    btn.querySelector('.mic-icon').textContent = '🎤';
+  }
+  if (activeRecognition) {
+    try { activeRecognition.stop(); } catch (e) {}
+    activeRecognition = null;
+  }
+}
+// ============================================================
+// API使用量ダッシュボード
+// ============================================================
+
+function showDashboard() {
+  document.getElementById('dashboardModal').classList.remove('hidden');
+  document.getElementById('dashboardBody').innerHTML =
+    '<div style="text-align:center; padding:40px; color:#999;">読み込み中...</div>';
+
+  google.script.run
+    .withSuccessHandler(renderDashboard)
+    .withFailureHandler(function(err) {
+      document.getElementById('dashboardBody').innerHTML =
+        '<div style="padding:24px; color:#c62828;">エラー: ' + err + '</div>';
+    })
+    .getApiUsageSummary();
+}
+
+function renderDashboard(data) {
+  var html = '';
+
+  // サマリーカード
+  html += '<div class="dash-cards">';
+  html += '<div class="dash-card highlight">';
+  html += '<div class="dash-value">' + (data.monthCalls || 0) + '</div>';
+  html += '<div class="dash-label">今月のAPI呼び出し</div>';
+  html += '</div>';
+  html += '<div class="dash-card">';
+  html += '<div class="dash-value">' + formatTokens(data.monthTokens || 0) + '</div>';
+  html += '<div class="dash-label">今月のトークン</div>';
+  html += '</div>';
+  html += '<div class="dash-card cost">';
+  html += '<div class="dash-value">' + (data.monthCostJpy || 0) + '円</div>';
+  html += '<div class="dash-label">今月のコスト</div>';
+  html += '</div>';
+  html += '</div>';
+
+  // 累計
+  html += '<div class="dash-cards">';
+  html += '<div class="dash-card">';
+  html += '<div class="dash-value">' + (data.totalCalls || 0) + '</div>';
+  html += '<div class="dash-label">累計API呼び出し</div>';
+  html += '</div>';
+  html += '<div class="dash-card">';
+  html += '<div class="dash-value">' + formatTokens(data.totalTokens || 0) + '</div>';
+  html += '<div class="dash-label">累計トークン</div>';
+  html += '</div>';
+  html += '<div class="dash-card cost">';
+  html += '<div class="dash-value">' + (data.totalCostJpy || 0) + '円</div>';
+  html += '<div class="dash-label">累計コスト</div>';
+  html += '</div>';
+  html += '</div>';
+
+  // 日別テーブル
+  var daily = data.daily || [];
+  if (daily.length > 0) {
+    html += '<div class="dash-section">';
+    html += '<h3>今月の日別使用量</h3>';
+    html += '<table class="dash-table">';
+    html += '<tr><th>日付</th><th>回数</th><th>トークン</th><th>コスト</th></tr>';
+    daily.forEach(function(d) {
+      html += '<tr>';
+      html += '<td>' + d.date + '</td>';
+      html += '<td>' + d.calls + '回</td>';
+      html += '<td>' + formatTokens(d.tokens) + '</td>';
+      html += '<td>' + d.costJpy + '円</td>';
+      html += '</tr>';
+    });
+    html += '</table>';
+    html += '</div>';
+  }
+
+  // モデル情報
+  html += '<div class="dash-model-info">';
+  html += 'モデル: ' + (data.model || 'Claude Sonnet 4.6') + '<br>';
+  html += 'リージョン: 東京 (ap-northeast-1)<br>';
+  html += '料金: 入力 $3/M tokens, 出力 $15/M tokens';
+  html += '</div>';
+
+  document.getElementById('dashboardBody').innerHTML = html;
+}
+
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function closeDashboard() {
+  document.getElementById('dashboardModal').classList.add('hidden');
+}
+
+function closeDashboardOnOverlay(event) {
+  if (event.target === document.getElementById('dashboardModal')) {
+    closeDashboard();
+  }
+}
+
+</script>
