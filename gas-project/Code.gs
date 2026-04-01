@@ -300,24 +300,31 @@ function testEvaluation() {
     '術者：右肩が痛いのですね。それはお辛いですね。わかりました。お大事にしてください。'
   ].join('\n');
 
+  // level を変更してテスト可能（1, 2, 3）
+  var testLevel = 3;
+
   var params = {
     transcript: sampleText,
-    level: 2,
+    level: testLevel,
     selfEval: { opening: 3, communication: 3, medicalInfo: 3, interpretationModel: 2, closing: 3, structure: 3 },
     interviewType: 'roleplay',
     studentName: 'テスト太郎'
   };
 
   try {
-    var result = evaluateInterview(params);
+    var resultStr = evaluateInterview(params);
+    var result = JSON.parse(resultStr);
     Logger.log('成功: ' + result.success);
     if (result.success) {
       var eval_ = result.data.evaluation;
+      Logger.log('Level: ' + testLevel);
       Logger.log('totalScore: ' + eval_.totalScore);
       Logger.log('grade: ' + eval_.grade);
       Logger.log('strengths数: ' + (eval_.strengths ? eval_.strengths.length : 0));
       Logger.log('improvements数: ' + (eval_.improvements ? eval_.improvements.length : 0));
-      Logger.log('全データ: ' + JSON.stringify(result.data).substring(0, 2000));
+      Logger.log('reflectionQuestions数: ' + (eval_.reflectionQuestions ? eval_.reflectionQuestions.length : 0));
+      Logger.log('itemEvaluations数: ' + (eval_.itemEvaluations ? eval_.itemEvaluations.length : 0));
+      Logger.log('全データ（先頭3000文字）: ' + JSON.stringify(result.data).substring(0, 3000));
     } else {
       Logger.log('エラー: ' + result.error);
     }

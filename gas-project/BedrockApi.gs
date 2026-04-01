@@ -6,7 +6,7 @@
 var BEDROCK_CONFIG = {
   MODEL_ID: 'global.anthropic.claude-sonnet-4-6',
   REGION: 'ap-northeast-1',
-  MAX_OUTPUT_TOKENS: 8192,
+  MAX_OUTPUT_TOKENS: 16384,
   // Claude Sonnet 4.6 Bedrock pricing (USD per 1M tokens)
   INPUT_PRICE_PER_M: 3.00,
   OUTPUT_PRICE_PER_M: 15.00,
@@ -233,12 +233,31 @@ function parseAiResponse(responseText) {
     if (parsed.categoryScores) {
       Object.keys(parsed.categoryScores).forEach(function(key) {
         var cat = parsed.categoryScores[key];
-        if (typeof cat.score === 'string') cat.score = parseInt(cat.score, 10) || 0;
+        if (typeof cat.score === 'string') cat.score = parseFloat(cat.score) || 0;
         if (typeof cat.maxScore === 'string') cat.maxScore = parseInt(cat.maxScore, 10) || 0;
       });
     }
 
-    Logger.log('AIレスポンスパース成功。totalScore=' + parsed.totalScore + ', grade=' + parsed.grade);
+    // dialogueAnalysisの数値補正
+    if (parsed.dialogueAnalysis) {
+      var da = parsed.dialogueAnalysis;
+      ['practitionerUtterances', 'patientUtterances', 'openQuestionCount',
+       'closedQuestionCount', 'empathyCount', 'reflectionCount',
+       'summaryCount', 'facilitationCount'].forEach(function(key) {
+        if (typeof da[key] === 'string') da[key] = parseInt(da[key], 10) || 0;
+      });
+    }
+
+    // itemEvaluationsのスコア数値補正
+    if (parsed.itemEvaluations && Array.isArray(parsed.itemEvaluations)) {
+      parsed.itemEvaluations.forEach(function(item) {
+        if (typeof item.score === 'string') item.score = parseFloat(item.score) || 0;
+        if (typeof item.maxScore === 'string') item.maxScore = parseFloat(item.maxScore) || 0;
+      });
+    }
+
+    Logger.log('AIレスポンスパース成功。totalScore=' + parsed.totalScore + ', grade=' + parsed.grade +
+      ', items=' + (parsed.itemEvaluations ? parsed.itemEvaluations.length : 0));
     return parsed;
   } catch (e) {
     Logger.log('JSONパースエラー。応答: ' + responseText.substring(0, 1000));
