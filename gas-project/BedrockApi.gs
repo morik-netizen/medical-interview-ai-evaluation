@@ -6,7 +6,7 @@
 var BEDROCK_CONFIG = {
   MODEL_ID: 'global.anthropic.claude-sonnet-4-6',
   REGION: 'ap-northeast-1',
-  MAX_OUTPUT_TOKENS: 16384,
+  MAX_OUTPUT_TOKENS: 32768,
   // Claude Sonnet 4.6 Bedrock pricing (USD per 1M tokens)
   INPUT_PRICE_PER_M: 3.00,
   OUTPUT_PRICE_PER_M: 15.00,
@@ -83,8 +83,17 @@ function callBedrockWithRetry(prompt, maxRetries) {
       continue;
     }
 
-    var errorText = response.getContentText().substring(0, 300);
+    var errorText = response.getContentText().substring(0, 500);
     Logger.log('Bedrock APIエラー (HTTP ' + responseCode + '): ' + errorText);
+
+    // トークン超過エラーの場合もリトライ
+    if (errorText.indexOf('too long') !== -1 || errorText.indexOf('token') !== -1 ||
+        errorText.indexOf('length') !== -1 || responseCode === 400) {
+      Logger.log('出力サイズ超過の可能性。リトライ (' + (i + 1) + '/' + maxRetries + ')');
+      Utilities.sleep(5000);
+      continue;
+    }
+
     throw new Error('AIサービスでエラーが発生しました。しばらく待ってから再度お試しください。');
   }
 
