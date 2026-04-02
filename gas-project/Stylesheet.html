@@ -920,6 +920,97 @@ select:focus, input:focus, textarea:focus {
 }
 
 /* ============================================================
+   録音同意の説明
+   ============================================================ */
+
+/* 同意説明ボタン */
+.btn-consent-guide {
+  padding: 8px 24px;
+  border: 2px solid #ff9800;
+  border-radius: 8px;
+  background: #fff8e1;
+  color: #e65100;
+  font-size: 0.95em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-consent-guide:hover {
+  background: #ff9800;
+  color: #fff;
+}
+
+/* 共通 */
+.consent-section {
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.consent-title {
+  font-size: 1.05em;
+  font-weight: bold;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.consent-script {
+  border-radius: 0 8px 8px 0;
+  padding: 16px 20px;
+  font-size: 1.1em;
+  line-height: 2;
+  color: var(--text);
+}
+
+.consent-script p {
+  margin: 0;
+}
+
+/* 教員カラー: 緑系 */
+.consent-teacher {
+  background: #e8f5e9;
+}
+
+.consent-title-teacher {
+  color: #2e7d32;
+  border-bottom: 2px solid #2e7d32;
+}
+
+.consent-script-teacher {
+  background: #fff;
+  border-left: 4px solid #2e7d32;
+}
+
+/* 学生カラー: オレンジ系 */
+.consent-student {
+  background: #fff3e0;
+}
+
+.consent-title-student {
+  color: #e65100;
+  border-bottom: 2px solid #e65100;
+}
+
+.consent-script-student {
+  background: #fff;
+  border-left: 4px solid #e65100;
+}
+
+/* 注意書き */
+.consent-note {
+  margin-top: 20px;
+  padding: 12px 16px;
+  background: #fce4ec;
+  border-left: 4px solid #c62828;
+  border-radius: 0 8px 8px 0;
+  font-size: 0.9em;
+  color: #c62828;
+}
+
+/* ============================================================
    入力方法タブ
    ============================================================ */
 

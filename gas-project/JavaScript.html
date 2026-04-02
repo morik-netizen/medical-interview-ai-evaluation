@@ -1133,4 +1133,22 @@ function closeDashboardOnOverlay(event) {
   }
 }
 
+// ============================================================
+// 録音同意の説明モーダル
+// ============================================================
+
+function showConsentGuide() {
+  document.getElementById('consentModal').classList.remove('hidden');
+}
+
+function closeConsentGuide() {
+  document.getElementById('consentModal').classList.add('hidden');
+}
+
+function closeConsentOnOverlay(event) {
+  if (event.target === document.getElementById('consentModal')) {
+    closeConsentGuide();
+  }
+}
+
 </script>

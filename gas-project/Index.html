@@ -16,6 +16,13 @@
     <div class="subtitle">朝日医療大学校 柔道整復学科 臨床実習</div>
   </div>
 
+  <!-- 録音同意の説明ボタン -->
+  <div style="text-align:center; margin-bottom:16px;">
+    <button class="btn-consent-guide" onclick="showConsentGuide()">
+      録音の同意説明を見る
+    </button>
+  </div>
+
   <!-- ステップ表示 -->
   <div class="steps">
     <div class="step active" id="stepIndicator1">1. テキスト入力</div>
@@ -234,6 +241,46 @@
 </div>
 
 <!-- ============================================================ -->
+<!-- ============================================================ -->
+<!-- 録音同意の説明モーダル -->
+<!-- ============================================================ -->
+<div id="consentModal" class="modal-overlay hidden" onclick="closeConsentOnOverlay(event)">
+  <div class="modal-content" style="max-width:600px;">
+    <div class="modal-header">
+      <h2>録音の同意説明</h2>
+      <button class="btn-icon" onclick="closeConsentGuide()">&#10005;</button>
+    </div>
+    <div style="padding:24px;">
+
+      <!-- 教員向け -->
+      <div class="consent-section consent-teacher">
+        <h3 class="consent-title consent-title-teacher">教員が説明する場合</h3>
+        <div class="consent-script consent-script-teacher">
+          <p>「学生の勉強のために、今日の面接を録音させていただいてもよろしいですか？</p>
+          <p>お名前などの個人情報はすべて自動で消されますのでご安心ください。</p>
+          <p>お断りいただいても大丈夫です。」</p>
+        </div>
+      </div>
+
+      <!-- 学生向け -->
+      <div class="consent-section consent-student" style="margin-top:24px;">
+        <h3 class="consent-title consent-title-student">学生が説明する場合</h3>
+        <div class="consent-script consent-script-student">
+          <p>「本日面接を担当させていただきます、実習生の○○です。</p>
+          <p>面接の勉強のために録音させていただきたいのですが、よろしいでしょうか？</p>
+          <p>個人情報は自動で消えるようになっていますので、ご安心ください。</p>
+          <p>もちろん、嫌でしたらおっしゃってください。」</p>
+        </div>
+      </div>
+
+      <div class="consent-note">
+        <strong>ポイント:</strong> 患者さんが断った場合は、録音せずに通常通り面接を行います。施術には一切影響しません。
+      </div>
+
+    </div>
+  </div>
+</div>
+
 <!-- API使用量ダッシュボード -->
 <!-- ============================================================ -->
 <div id="dashboardModal" class="modal-overlay hidden" onclick="closeDashboardOnOverlay(event)">
